@@ -19,7 +19,7 @@
 
 """Operate app CLI module."""
 import asyncio
-import http
+import http.client
 import logging
 import os
 import signal
@@ -27,6 +27,7 @@ import traceback
 import typing as t
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from http import HTTPStatus
 from pathlib import Path
 from types import FrameType
 
@@ -62,7 +63,7 @@ DEFAULT_HARDHAT_KEY = (
 ).encode()
 DEFAULT_MAX_RETRIES = 3
 USER_NOT_LOGGED_IN_ERROR = JSONResponse(
-    content={"error": "User not logged in!"}, status_code=http.HTTPStatus.UNAUTHORIZED
+    content={"error": "User not logged in!"}, status_code=HTTPStatus.UNAUTHORIZED
 )
 
 
@@ -70,7 +71,7 @@ def service_not_found_error(service_config_id: str) -> JSONResponse:
     """Service not found error response"""
     return JSONResponse(
         content={"error": f"Service {service_config_id} not found"}, 
-        status_code=http.HTTPStatus.NOT_FOUND
+        status_code=HTTPStatus.NOT_FOUND
     )
 
 
@@ -333,7 +334,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                     errors.append(error)
                     return JSONResponse(
                         content={"errors": errors}, 
-                        status_code=http.HTTPStatus.INTERNAL_SERVER_ERROR
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR
                     )
                 except Exception as e:  # pylint: disable=broad-except
                     errors.append(
@@ -343,7 +344,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                 retries += 1
             return JSONResponse(
                 content={"errors": errors}, 
-                status_code=http.HTTPStatus.INTERNAL_SERVER_ERROR
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR
             )
 
         return _call
@@ -376,12 +377,12 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
             logger.info("Stopping services on demand done.")
             return JSONResponse(
                 content={"message": "Services stopped."},
-                status_code=http.HTTPStatus.OK
+                status_code=HTTPStatus.OK
             )
         except Exception as e:  # pylint: disable=broad-except
             return JSONResponse(
                 content={"error": str(e), "traceback": traceback.format_exc()},
-                status_code=http.HTTPStatus.INTERNAL_SERVER_ERROR
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR
             )
 
     @app.get("/api")
@@ -403,7 +404,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is not None:
             return JSONResponse(
                 content={"error": "Account already exists"},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         data = await request.json()
@@ -421,7 +422,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Account does not exist."},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         data = await request.json()
@@ -434,7 +435,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                 content={
                     "error": "You must provide exactly one of 'old_password' or 'mnemonic' (seed phrase).",
                 },
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if old_password and mnemonic:
@@ -442,7 +443,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                 content={
                     "error": "You must provide exactly one of 'old_password' or 'mnemonic' (seed phrase), but not both.",
                 },
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         try:
@@ -466,12 +467,12 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         except ValueError as e:
             return JSONResponse(
                 content={"error": str(e)}, 
-                status_code=http.HTTPStatus.BAD_REQUEST
+                status_code=HTTPStatus.BAD_REQUEST
             )
         except Exception as e:  # pylint: disable=broad-except
             return JSONResponse(
                 content={"error": str(e), "traceback": traceback.format_exc()},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
     @app.post("/api/account/login")
@@ -481,20 +482,20 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Account does not exist"},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         data = await request.json()
         if not operate.user_account.is_valid(password=data["password"]):
             return JSONResponse(
                 content={"error": "Password is not valid"},
-                status_code=http.HTTPStatus.UNAUTHORIZED,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         operate.password = data["password"]
         return JSONResponse(
             content={"message": "Login successful"},
-            status_code=http.HTTPStatus.OK,
+            status_code=HTTPStatus.OK,
         )
 
     @app.get("/api/wallet")
@@ -515,7 +516,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if not manager.exists(ledger_type=ledger_type):
             return JSONResponse(
                 content={"error": "Wallet does not exist"},
-                status_code=http.HTTPStatus.NOT_FOUND,
+                status_code=HTTPStatus.NOT_FOUND,
             )
         return JSONResponse(
             content=manager.load(ledger_type=ledger_type).json,
@@ -528,13 +529,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot create wallet; User account does not exist!"},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before creating a wallet"},
-                status_code=http.HTTPStatus.UNAUTHORIZED,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -581,7 +582,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if not manager.exists(ledger_type=ledger_type):
             return JSONResponse(
                 content={"error": "Wallet does not exist"},
-                status_code=http.HTTPStatus.NOT_FOUND,
+                status_code=HTTPStatus.NOT_FOUND,
             )
         safes = manager.load(ledger_type=ledger_type).safes
         if safes is None or safes.get(chain) is None:
@@ -600,13 +601,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot create safe; User account does not exist!"},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before creating a safe"},
-                status_code=http.HTTPStatus.UNAUTHORIZED,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -653,13 +654,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot create safe; User account does not exist!"},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before creating a safe"},
-                status_code=http.HTTPStatus.UNAUTHORIZED,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -709,13 +710,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot update safe; User account does not exist!"},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before updating a safe."},
-                status_code=http.HTTPStatus.UNAUTHORIZED,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -723,7 +724,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if "chain" not in data:
             return JSONResponse(
                 content={"error": "You need to specify a chain to updae a safe."},
-                status_code=http.HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         chain = Chain(data["chain"])
@@ -732,7 +733,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if not manager.exists(ledger_type=ledger_type):
             return JSONResponse(
                 content={"error": "Wallet does not exist"},
-                status_code=http.HTTPStatus.UNAUTHORIZED,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         wallet = manager.load(ledger_type=ledger_type)
