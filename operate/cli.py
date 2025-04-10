@@ -26,6 +26,7 @@ import traceback
 import typing as t
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from http import HTTPStatus
 from pathlib import Path
 from types import FrameType
 
@@ -61,14 +62,15 @@ DEFAULT_HARDHAT_KEY = (
 ).encode()
 DEFAULT_MAX_RETRIES = 3
 USER_NOT_LOGGED_IN_ERROR = JSONResponse(
-    content={"error": "User not logged in!"}, status_code=401
+    content={"error": "User not logged in!"}, status_code=HTTPStatus.UNAUTHORIZED
 )
 
 
 def service_not_found_error(service_config_id: str) -> JSONResponse:
     """Service not found error response"""
     return JSONResponse(
-        content={"error": f"Service {service_config_id} not found"}, status_code=404
+        content={"error": f"Service {service_config_id} not found"}, 
+        status_code=HTTPStatus.NOT_FOUND
     )
 
 
@@ -329,14 +331,20 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                     else:
                         error["error"] = str(e)
                     errors.append(error)
-                    return JSONResponse(content={"errors": errors}, status_code=500)
+                    return JSONResponse(
+                        content={"errors": errors}, 
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR
+                    )
                 except Exception as e:  # pylint: disable=broad-except
                     errors.append(
                         {"error": str(e.args[0]), "traceback": traceback.format_exc()}
                     )
                     logger.error(f"Error {str(e.args[0])}\n{traceback.format_exc()}")
                 retries += 1
-            return JSONResponse(content={"errors": errors}, status_code=500)
+            return JSONResponse(
+                content={"errors": errors}, 
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR
+            )
 
         return _call
 
@@ -366,18 +374,24 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
             logger.info("Stopping services on demand...")
             pause_all_services()
             logger.info("Stopping services on demand done.")
-            return JSONResponse(content={"message": "Services stopped."})
+            return JSONResponse(
+                content={"message": "Services stopped."},
+                status_code=HTTPStatus.OK
+            )
         except Exception as e:  # pylint: disable=broad-except
             return JSONResponse(
                 content={"error": str(e), "traceback": traceback.format_exc()},
-                status_code=500,
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR
             )
 
     @app.get("/api")
     @with_retries
     async def _get_api(request: Request) -> JSONResponse:
         """Get API info."""
-        return JSONResponse(content=operate.json)
+        return JSONResponse(
+            content=operate.json,
+            status_code=HTTPStatus.OK
+        )
 
     @app.get("/api/account")
     @with_retries
@@ -392,7 +406,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is not None:
             return JSONResponse(
                 content={"error": "Account already exists"},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         data = await request.json()
@@ -410,7 +424,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Account does not exist."},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         data = await request.json()
@@ -423,7 +437,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                 content={
                     "error": "You must provide exactly one of 'old_password' or 'mnemonic' (seed phrase).",
                 },
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if old_password and mnemonic:
@@ -431,7 +445,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                 content={
                     "error": "You must provide exactly one of 'old_password' or 'mnemonic' (seed phrase), but not both.",
                 },
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         try:
@@ -453,11 +467,14 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
                 content={"error": None, "message": "Password not updated."}
             )
         except ValueError as e:
-            return JSONResponse(content={"error": str(e)}, status_code=400)
+            return JSONResponse(
+                content={"error": str(e)}, 
+                status_code=HTTPStatus.BAD_REQUEST
+            )
         except Exception as e:  # pylint: disable=broad-except
             return JSONResponse(
                 content={"error": str(e), "traceback": traceback.format_exc()},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
     @app.post("/api/account/login")
@@ -467,20 +484,20 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Account does not exist"},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         data = await request.json()
         if not operate.user_account.is_valid(password=data["password"]):
             return JSONResponse(
                 content={"error": "Password is not valid"},
-                status_code=401,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         operate.password = data["password"]
         return JSONResponse(
             content={"message": "Login successful"},
-            status_code=200,
+            status_code=HTTPStatus.OK,
         )
 
     @app.get("/api/wallet")
@@ -501,7 +518,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if not manager.exists(ledger_type=ledger_type):
             return JSONResponse(
                 content={"error": "Wallet does not exist"},
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
             )
         return JSONResponse(
             content=manager.load(ledger_type=ledger_type).json,
@@ -514,13 +531,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot create wallet; User account does not exist!"},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before creating a wallet"},
-                status_code=401,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -567,7 +584,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if not manager.exists(ledger_type=ledger_type):
             return JSONResponse(
                 content={"error": "Wallet does not exist"},
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
             )
         safes = manager.load(ledger_type=ledger_type).safes
         if safes is None or safes.get(chain) is None:
@@ -586,13 +603,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot create safe; User account does not exist!"},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before creating a safe"},
-                status_code=401,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -639,13 +656,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot create safe; User account does not exist!"},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before creating a safe"},
-                status_code=401,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -695,13 +712,13 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if operate.user_account is None:
             return JSONResponse(
                 content={"error": "Cannot update safe; User account does not exist!"},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         if operate.password is None:
             return JSONResponse(
                 content={"error": "You need to login before updating a safe."},
-                status_code=401,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         data = await request.json()
@@ -709,7 +726,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if "chain" not in data:
             return JSONResponse(
                 content={"error": "You need to specify a chain to updae a safe."},
-                status_code=401,
+                status_code=HTTPStatus.BAD_REQUEST,
             )
 
         chain = Chain(data["chain"])
@@ -718,7 +735,7 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         if not manager.exists(ledger_type=ledger_type):
             return JSONResponse(
                 content={"error": "Wallet does not exist"},
-                status_code=401,
+                status_code=HTTPStatus.UNAUTHORIZED,
             )
 
         wallet = manager.load(ledger_type=ledger_type)
@@ -810,376 +827,3 @@ def create_app(  # pylint: disable=too-many-locals, unused-argument, too-many-st
         output = manager.create(service_template=template)
 
         return JSONResponse(content=output.json)
-
-    @app.post("/api/v2/service/{service_config_id}")
-    @with_retries
-    async def _deploy_and_run_service(request: Request) -> JSONResponse:
-        """Deploy a service."""
-        if operate.password is None:
-            return USER_NOT_LOGGED_IN_ERROR
-
-        pause_all_services()
-        service_config_id = request.path_params["service_config_id"]
-        manager = operate.service_manager()
-
-        if not manager.exists(service_config_id=service_config_id):
-            return service_not_found_error(service_config_id=service_config_id)
-
-        def _fn() -> None:
-            # deploy_service_onchain_from_safe includes stake_service_on_chain_from_safe
-            manager.deploy_service_onchain_from_safe(
-                service_config_id=service_config_id
-            )
-            manager.fund_service(service_config_id=service_config_id)
-            manager.deploy_service_locally(service_config_id=service_config_id)
-
-        await run_in_executor(_fn)
-        schedule_funding_job(service_config_id=service_config_id)
-        schedule_healthcheck_job(service_config_id=service_config_id)
-
-        return JSONResponse(
-            content=(
-                operate.service_manager().load(service_config_id=service_config_id).json
-            )
-        )
-
-    @app.put("/api/v2/service/{service_config_id}")
-    @app.patch("/api/v2/service/{service_config_id}")
-    @with_retries
-    async def _update_service(request: Request) -> JSONResponse:
-        """Update a service."""
-        if operate.password is None:
-            return USER_NOT_LOGGED_IN_ERROR
-
-        service_config_id = request.path_params["service_config_id"]
-        manager = operate.service_manager()
-
-        if not manager.exists(service_config_id=service_config_id):
-            return service_not_found_error(service_config_id=service_config_id)
-
-        template = await request.json()
-        allow_different_service_public_id = template.get(
-            "allow_different_service_public_id", False
-        )
-
-        if request.method == "PUT":
-            partial_update = False
-        else:
-            partial_update = True
-
-        logger.info(
-            f"_update_service {partial_update=} {allow_different_service_public_id=}"
-        )
-
-        output = manager.update(
-            service_config_id=service_config_id,
-            service_template=template,
-            allow_different_service_public_id=allow_different_service_public_id,
-            partial_update=partial_update,
-        )
-
-        return JSONResponse(content=output.json)
-
-    @app.put("/api/v2/services")
-    @with_retries
-    async def _update_all_services(request: Request) -> JSONResponse:
-        """Update all services of matching the public id referenced in the hash."""
-        if operate.password is None:
-            return USER_NOT_LOGGED_IN_ERROR
-
-        manager = operate.service_manager()
-        template = await request.json()
-        updated_services = manager.update_all_matching(service_template=template)
-
-        return JSONResponse(content=updated_services)
-
-    @app.post("/api/v2/service/{service_config_id}/deployment/stop")
-    @with_retries
-    async def _stop_service_locally(request: Request) -> JSONResponse:
-        """Stop a service deployment."""
-
-        # No authentication required to stop services.
-
-        service_config_id = request.path_params["service_config_id"]
-        manager = operate.service_manager()
-
-        if not manager.exists(service_config_id=service_config_id):
-            return service_not_found_error(service_config_id=service_config_id)
-
-        service = operate.service_manager().load(service_config_id=service_config_id)
-        service.remove_latest_healthcheck()
-        deployment = service.deployment
-        health_checker.stop_for_service(service_config_id=service_config_id)
-
-        await run_in_executor(deployment.stop)
-        logger.info(f"Cancelling funding job for {service_config_id}")
-        cancel_funding_job(service_config_id=service_config_id)
-        return JSONResponse(content=deployment.json)
-
-    @app.post("/api/v2/service/{service_config_id}/onchain/withdraw")
-    @with_retries
-    async def _withdraw_onchain(request: Request) -> JSONResponse:
-        """Withdraw all the funds from a service."""
-
-        if operate.password is None:
-            return USER_NOT_LOGGED_IN_ERROR
-
-        service_config_id = request.path_params["service_config_id"]
-        service_manager = operate.service_manager()
-
-        if not service_manager.exists(service_config_id=service_config_id):
-            return service_not_found_error(service_config_id=service_config_id)
-
-        withdrawal_address = (await request.json()).get("withdrawal_address")
-        if withdrawal_address is None:
-            return JSONResponse(
-                content={"error": "withdrawal_address is required"},
-                status_code=400,
-            )
-
-        try:
-            pause_all_services()
-            service = service_manager.load(service_config_id=service_config_id)
-
-            # terminate the service on chain
-            for chain in service.chain_configs:
-                service_manager.terminate_service_on_chain_from_safe(
-                    service_config_id=service_config_id,
-                    chain=chain,
-                    withdrawal_address=withdrawal_address,
-                )
-
-            # drain the master safe and master signer for the home chain
-            chain = Chain(service.home_chain)
-            master_wallet = service_manager.wallet_manager.load(
-                ledger_type=chain.ledger_type
-            )
-
-            # drain the master safe
-            logger.info(
-                f"Draining the Master Safe {master_wallet.safes[chain]} on chain {chain.value} (withdrawal address {withdrawal_address})."
-            )
-            master_wallet.drain(
-                withdrawal_address=withdrawal_address,
-                chain=chain,
-                from_safe=True,
-            )
-
-            # drain the master signer
-            logger.info(
-                f"Draining the Master Signer {master_wallet.address} on chain {chain.value} (withdrawal address {withdrawal_address})."
-            )
-            master_wallet.drain(
-                withdrawal_address=withdrawal_address,
-                chain=chain,
-                from_safe=False,
-            )
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(traceback.format_exc())
-            return JSONResponse(
-                status_code=500,
-                content={"error": str(e), "traceback": traceback.format_exc()},
-            )
-
-        return JSONResponse(content={"error": None})
-
-    return app
-
-
-@group(name="operate")
-def _operate() -> None:
-    """Operate - deploy autonomous services."""
-
-
-@_operate.command(name="daemon")
-def _daemon(
-    host: Annotated[str, params.String(help="HTTP server host string")] = "localhost",
-    port: Annotated[int, params.Integer(help="HTTP server port")] = 8000,
-    home: Annotated[
-        t.Optional[Path], params.Directory(long_flag="--home", help="Home directory")
-    ] = None,
-) -> None:
-    """Launch operate daemon."""
-    app = create_app(home=home)
-
-    server = Server(
-        Config(
-            app=app,
-            host=host,
-            port=port,
-        )
-    )
-    app._server = server  # pylint: disable=protected-access
-    server.run()
-
-
-@_operate.command(name="quickstart")
-def qs_start(
-    config: Annotated[str, params.String(help="Quickstart config file path")],
-    attended: Annotated[
-        str, params.String(help="Run in attended/unattended mode (default: true")
-    ] = "true",
-    build_only: Annotated[
-        bool, params.Boolean(help="Only build the service without running it")
-    ] = False,
-    skip_dependency_check: Annotated[
-        bool,
-        params.Boolean(help="Will skip the dependencies check for minting the service"),
-    ] = False,
-) -> None:
-    """Quickstart."""
-    os.environ["ATTENDED"] = attended.lower()
-    operate = OperateApp()
-    operate.setup()
-    run_service(
-        operate=operate,
-        config_path=config,
-        build_only=build_only,
-        skip_dependency_check=skip_dependency_check,
-    )
-
-
-@_operate.command(name="quickstop")
-def qs_stop(
-    config: Annotated[str, params.String(help="Quickstart config file path")],
-) -> None:
-    """Quickstart."""
-    operate = OperateApp()
-    operate.setup()
-    stop_service(operate=operate, config_path=config)
-
-
-@_operate.command(name="terminate")
-def qs_terminate(
-    config: Annotated[str, params.String(help="Quickstart config file path")],
-    attended: Annotated[
-        str, params.String(help="Run in attended/unattended mode (default: true")
-    ] = "true",
-) -> None:
-    """Terminate service."""
-    os.environ["ATTENDED"] = attended.lower()
-    operate = OperateApp()
-    operate.setup()
-    terminate_service(operate=operate, config_path=config)
-
-
-@_operate.command(name="claim")
-def qs_claim(
-    config: Annotated[str, params.String(help="Quickstart config file path")],
-    attended: Annotated[
-        str, params.String(help="Run in attended/unattended mode (default: true")
-    ] = "true",
-) -> None:
-    """Quickclaim staking rewards."""
-    os.environ["ATTENDED"] = attended.lower()
-    operate = OperateApp()
-    operate.setup()
-    claim_staking_rewards(operate=operate, config_path=config)
-
-
-@_operate.command(name="reset-staking")
-def qs_reset_staking(
-    config: Annotated[str, params.String(help="Quickstart config file path")],
-    attended: Annotated[
-        str, params.String(help="Run in attended/unattended mode (default: true")
-    ] = "true",
-) -> None:
-    """Reset staking."""
-    os.environ["ATTENDED"] = attended.lower()
-    operate = OperateApp()
-    operate.setup()
-    reset_staking(operate=operate, config_path=config)
-
-
-@_operate.command(name="reset-password")
-def qs_reset_password(
-    attended: Annotated[
-        str, params.String(help="Run in attended/unattended mode (default: true")
-    ] = "true",
-) -> None:
-    """Reset password."""
-    os.environ["ATTENDED"] = attended.lower()
-    operate = OperateApp()
-    operate.setup()
-    reset_password(operate=operate)
-
-
-@_operate.command(name="analyse-logs")
-def qs_analyse_logs(  # pylint: disable=too-many-arguments
-    config: Annotated[str, params.String(help="Quickstart config file path")],
-    from_dir: Annotated[
-        str,
-        params.String(
-            help="Path to the logs directory. If not provided, it is auto-detected.",
-            default="",
-        ),
-    ],
-    agent: Annotated[
-        str,
-        params.String(
-            help="The agent name to analyze (default: 'aea_0').", default="aea_0"
-        ),
-    ],
-    reset_db: Annotated[
-        bool,
-        params.Boolean(
-            help="Use this flag to disable resetting the log database.", default=False
-        ),
-    ],
-    start_time: Annotated[
-        str,
-        params.String(help="Start time in `YYYY-MM-DD H:M:S,MS` format.", default=""),
-    ],
-    end_time: Annotated[
-        str, params.String(help="End time in `YYYY-MM-DD H:M:S,MS` format.", default="")
-    ],
-    log_level: Annotated[
-        str,
-        params.String(
-            help="Logging level. (INFO, DEBUG, WARNING, ERROR, CRITICAL)",
-            default="INFO",
-        ),
-    ],
-    period: Annotated[int, params.Integer(help="Period ID.", default="")],
-    round: Annotated[  # pylint: disable=redefined-builtin
-        str, params.String(help="Round name.", default="")
-    ],
-    behaviour: Annotated[str, params.String(help="Behaviour name filter.", default="")],
-    fsm: Annotated[
-        bool, params.Boolean(help="Print only the FSM execution path.", default=False)
-    ],
-    include_regex: Annotated[
-        str, params.String(help="Regex pattern to include in the result.", default="")
-    ],
-    exclude_regex: Annotated[
-        str, params.String(help="Regex pattern to exclude from the result.", default="")
-    ],
-) -> None:
-    """Analyse the logs of an agent."""
-    operate = OperateApp()
-    operate.setup()
-    analyse_logs(
-        operate=operate,
-        config_path=config,
-        from_dir=from_dir,
-        agent=agent,
-        reset_db=reset_db,
-        start_time=start_time,
-        end_time=end_time,
-        log_level=log_level,
-        period=period,
-        round=round,
-        behaviour=behaviour,
-        fsm=fsm,
-        include_regex=include_regex,
-        exclude_regex=exclude_regex,
-    )
-
-
-def main() -> None:
-    """CLI entry point."""
-    run(cli=_operate)
-
-
-if __name__ == "__main__":
-    main()
